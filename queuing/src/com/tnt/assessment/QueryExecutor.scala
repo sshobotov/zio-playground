@@ -14,6 +14,7 @@ class QueryExecutor(host: String, runHttpRequest: RequestExecution) {
     val request =
       get(s"$host/${service.entryName}")
         .addQueryParam("q", queries.mkString(","))
+        .build()
 
     for {
       response <- runHttpRequest(request).mapError(RuntimeExecutionFailure)

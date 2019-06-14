@@ -4,7 +4,7 @@ import java.util.Locale
 
 import enumeratum.{CirceEnum, Enum, EnumEntry}
 import enumeratum.EnumEntry.Lowercase
-import io.circe.{Decoder, Encoder, Error, Json}
+import io.circe.{Decoder, Encoder, Error, Json, KeyEncoder, KeyDecoder}
 import zio.{IO, UIO}
 
 object Services {
@@ -110,9 +110,22 @@ object Services {
     Encoder.encodeString.contramap(_.value)
   implicit val countryCodeDecoder: Decoder[CountryCode] =
     Decoder.decodeString.emap(CountryCode.fromString)
+  implicit val countryCodeKeyEncoder: KeyEncoder[CountryCode] =
+    KeyEncoder.encodeKeyString.contramap(_.value)
+  implicit val countryCodeKeyDecoder: KeyDecoder[CountryCode] =
+    KeyDecoder.instance(CountryCode.fromString(_).toOption)
 
   implicit val orderNumberEncoder: Encoder[OrderNumber] =
     Encoder.encodeInt.contramap(_.value)
   implicit val orderNumberDecoder: Decoder[OrderNumber] =
     Decoder.decodeInt.emap(OrderNumber.fromInt)
+  implicit val orderNumberKeyEncoder: KeyEncoder[OrderNumber] =
+    KeyEncoder.encodeKeyInt.contramap(_.value)
+  implicit val orderNumberKeyDecoder: KeyDecoder[OrderNumber] =
+    KeyDecoder.instance { raw =>
+      try OrderNumber.fromInt(raw.toInt).toOption
+      catch {
+        case _: NumberFormatException => None
+      }
+    }
 }
