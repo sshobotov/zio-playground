@@ -61,8 +61,8 @@ object Services {
   }
 
   case class Pipeline(
-      readQueries: Json => Either[ServiceError, List[Query]]
-    , mapResults:  Json => Either[ServiceError, Json]
+      readQueries: Json                => Either[ServiceError, List[Query]]
+    , mapResults:  (Json, List[Query]) => Either[ServiceError, Json]
   )
 
   def pipelineMap: PipelineMap = {
@@ -89,9 +89,9 @@ object Services {
   ): UIO[ResponseEntry] = {
     val executed =
       for {
-        query    <- IO.fromEither(pipeline.readQueries(request.query))
-        response <- executor.execute(request.identifier, query).mapError(RequestExecutionError)
-        result   <- IO.fromEither(pipeline.mapResults(response))
+        queries  <- IO.fromEither(pipeline.readQueries(request.query))
+        response <- executor.execute(request.identifier, queries).mapError(RequestExecutionError)
+        result   <- IO.fromEither(pipeline.mapResults(response, queries))
       } yield
         SuccessResponseEntry(request.identifier, result)
 
