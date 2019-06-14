@@ -5,6 +5,7 @@ object queuing extends ScalaModule {
 
   override def ivyDeps = Agg(
     ivy"dev.zio::zio:1.0.0-RC8-4",
+    ivy"dev.zio::zio-interop-java:1.0.0-RC8-4",
     ivy"org.asynchttpclient:async-http-client:2.10.0",
     ivy"io.circe::circe-core:0.10.0",
     ivy"io.circe::circe-generic:0.10.0",

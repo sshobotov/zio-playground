@@ -1,34 +1,34 @@
 package com.tnt.assessment
 
-import Domain.{CountryCode, Query}
-import ServiceApi.{Pipeline, RequestParsingError, ResponseParsingError, ServiceError}
+import Services._
 import io.circe.{Encoder, Json}
+import io.circe.syntax._
 
 class PricingApi extends {
   import PricingApi._
 
-  type Request  = Set[CountryCode]
-  type Response = Map[CountryCode, Price]
-
   def translateQuery(payload: Json): Either[ServiceError, List[Query]] =
     payload
       .as[Request]
-      .left.map(RequestParsingError.apply)
+      .left.map(RequestParsingError(_))
       .map {
         _.map(_.value.toString).toList
       }
 
   def translateResponse(response: Json): Either[ServiceError, Response] =
     response
-      .as[Response]
-      .left.map(ResponseParsingError.apply)
+      .as[Map[CountryCode, Double]]
+      .left.map(ResponseParsingError(_))
 }
 
 object PricingApi {
   type Price = Double
 
-  def pipeline(implicit encoder: Encoder[Price]): Pipeline[Price] = {
+  type Request  = Set[CountryCode]
+  type Response = Map[CountryCode, Price]
+
+  def pipeline(implicit encoder: Encoder[Price]): Pipeline = {
     val api = new PricingApi
-    Pipeline(api.translateQuery, api.translateResponse)
+    Pipeline(api.translateQuery, api.translateResponse(_).map(_.asJson))
   }
 }

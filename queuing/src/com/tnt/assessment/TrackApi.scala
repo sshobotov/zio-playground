@@ -1,21 +1,18 @@
 package com.tnt.assessment
 
-import Domain.{OrderNumber, Query}
-import ServiceApi.{Pipeline, RequestParsingError, ResponseParsingError, ServiceError}
+import Services._
 import enumeratum.{CirceEnum, Enum, EnumEntry}
 import enumeratum.EnumEntry.UpperWords
 import io.circe.{Encoder, Json}
+import io.circe.syntax._
 
 class TrackApi {
   import TrackApi._
 
-  type Request  = Set[OrderNumber]
-  type Response = Map[OrderNumber, Status]
-
   def translateQuery(payload: Json): Either[ServiceError, List[Query]] =
     payload
       .as[Request]
-      .left.map(RequestParsingError.apply)
+      .left.map(RequestParsingError(_))
       .map {
         _.map(_.value.toString).toList
       }
@@ -23,10 +20,13 @@ class TrackApi {
   def translateResponse(response: Json): Either[ServiceError, Response] =
     response
       .as[Response]
-      .left.map(ResponseParsingError.apply)
+      .left.map(ResponseParsingError(_))
 }
 
 object TrackApi {
+  type Request  = Set[OrderNumber]
+  type Response = Map[OrderNumber, Status]
+
   sealed trait Status extends EnumEntry with UpperWords
 
   object Status extends Enum[Status] with CirceEnum[Status] {
@@ -40,8 +40,8 @@ object TrackApi {
     override val values = findValues
   }
 
-  def pipeline(implicit encoder: Encoder[Status]): Pipeline[Status] = {
+  def pipeline(implicit encoder: Encoder[Status]): Pipeline = {
     val api = new TrackApi
-    Pipeline(api.translateQuery, api.translateResponse)
+    Pipeline(api.translateQuery, api.translateResponse(_).map(_.asJson))
   }
 }
