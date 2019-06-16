@@ -5,16 +5,16 @@ import QueryExecutor._
 import io.circe.parser
 import org.asynchttpclient._
 import org.asynchttpclient.Dsl._
-import zio.{IO, Promise, Queue, Task, UIO}
+import zio.{IO, Promise, Queue, Task, UIO, ZIO}
+import zio.clock.Clock
+import zio.duration.Duration
 import zio.interop.javaconcurrent._
 
-import scala.annotation.tailrec
-
-trait QueryExecutor {
-  def execute(service: ServiceIdentifier, queries: List[Query]): IO[ExecutionFailure, BatchResult]
+trait QueryExecutor[R] {
+  def execute(service: ServiceIdentifier, queries: List[Query]): ZIO[R, ExecutionFailure, BatchResult]
 }
 
-class HttpQueryExecutor(host: String, runHttpRequest: RequestExecution) extends QueryExecutor {
+class HttpQueryExecutor(host: String, runHttpRequest: HttpQueryExecutor.RequestExecution) extends QueryExecutor[Any] {
   def execute(service: ServiceIdentifier, queries: List[Query]): IO[ExecutionFailure, BatchResult] = {
     val request =
       get(s"$host/${service.entryName}")
@@ -38,23 +38,36 @@ class HttpQueryExecutor(host: String, runHttpRequest: RequestExecution) extends 
   }
 }
 
+object HttpQueryExecutor {
+  type RequestExecution = Request => Task[Response]
+
+  def httpClient(httpClient: AsyncHttpClient): RequestExecution =
+    request => Task.fromFutureJava(IO(httpClient.executeRequest(request)))
+}
+
 class ThrottlingQueryExecutor private(
-    queues: Map[ServiceIdentifier, Queue[ThrottlingQueryExecutor.EnqueuedJob]]
-) extends QueryExecutor {
-  def execute(service: ServiceIdentifier, queries: List[Query]): IO[ExecutionFailure, BatchResult] =
+    queues:  Map[ServiceIdentifier, Queue[ThrottlingQueryExecutor.EnqueuedJob]]
+  , timeout: Duration.Finite
+) extends QueryExecutor[Clock] {
+  def execute(service: ServiceIdentifier, queries: List[Query]): ZIO[Clock, ExecutionFailure, BatchResult] =
     for {
       promise <- Promise.make[ExecutionFailure, BatchResult]
       _       <- queues(service).offer((queries, promise))
-      result  <- promise.await
-    } yield result
+      result  <- promise.await.timeout(timeout)
+    } yield
+      result.getOrElse(Map.empty)
 }
 
 object ThrottlingQueryExecutor {
-  type QueuesConsumer   = UIO[Nothing]
-  type ResolvableResult = Promise[ExecutionFailure, BatchResult]
-  type EnqueuedJob      = (List[Query], ResolvableResult)
+  type QueuesConsumer[R]  = ZIO[R, Nothing, Nothing]
+  type ResolvableResult   = Promise[ExecutionFailure, BatchResult]
+  type EnqueuedJob        = (List[Query], ResolvableResult)
 
-  def apply(underlying: QueryExecutor, batchSize: Int): UIO[(ThrottlingQueryExecutor, QueuesConsumer)] =
+  def apply[R](
+      underlying: QueryExecutor[R]
+    , batchSize:  Int
+    , timeout:    Duration.Finite
+  ): UIO[(ThrottlingQueryExecutor, QueuesConsumer[R])] =
     UIO.collectAll {
       ServiceIdentifier.values map { identifier =>
         Queue.unbounded[EnqueuedJob] map { (identifier, _) }
@@ -82,10 +95,10 @@ object ThrottlingQueryExecutor {
           .reduce(_ race _)
           .refailWithTrace
 
-      (new ThrottlingQueryExecutor(queues.toMap), consumeAll)
+      (new ThrottlingQueryExecutor(queues.toMap, timeout), consumeAll)
     }
 
-  implicit class BatchingOps[T](val io: UIO[T]) extends AnyVal {
+  private implicit class BatchingOps[T](val io: UIO[T]) extends AnyVal {
     def batched(size: Int): UIO[List[T]] =
       if (size > 0)
         for {
@@ -98,10 +111,16 @@ object ThrottlingQueryExecutor {
 }
 
 object QueryExecutor {
-  type RequestExecution = Request => Task[Response]
-
-  def httpClient(httpClient: AsyncHttpClient): RequestExecution =
-    request => Task.fromFutureJava(IO(httpClient.executeRequest(request)))
+  def throttlingHttpQueryExecutor(
+      host:      String
+    , batchSize: Int
+    , timeout:   Duration.Finite
+  ) =
+    ThrottlingQueryExecutor(
+        new HttpQueryExecutor(host, HttpQueryExecutor.httpClient(asyncHttpClient()))
+      , batchSize
+      , timeout
+    )
 
   sealed trait ExecutionFailure
 

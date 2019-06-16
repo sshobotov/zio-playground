@@ -4,7 +4,7 @@ import com.tnt.assessment.api.{PricingApi, ShipmentApi, TrackApi}
 import enumeratum.{Enum, EnumEntry}
 import enumeratum.EnumEntry.Lowercase
 import io.circe.{Decoder, Error, Json}
-import zio.{IO, UIO}
+import zio.{IO, ZIO}
 
 object QueuingService {
   import QueryExecutor.ExecutionFailure
@@ -58,22 +58,22 @@ object QueuingService {
     case ServiceIdentifier.Pricing  => PricingApi.dataMapping
   }
 
-  def executeRequests(
+  def executeRequests[R](
       requests: Requests
     , services: ServiceMap
-    , executor: QueryExecutor
-  ): UIO[Response] =
-    UIO.collectAllPar(
+    , executor: QueryExecutor[R]
+  ): ZIO[R, Nothing, Response] =
+    ZIO.collectAllPar(
       requests map { request =>
         executeSingleRequest(request, services(request.identifier), executor)
       }
     )
 
-  private def executeSingleRequest(
+  private def executeSingleRequest[R](
       request:     RequestEntry
     , dataMapping: ServiceDataMapping
-    , executor:    QueryExecutor
-  ): UIO[ResponseEntry] = {
+    , executor:    QueryExecutor[R]
+  ): ZIO[R, Nothing, ResponseEntry] = {
     val executed =
       for {
         queries  <- IO.fromEither(validateQueries(request.queries, dataMapping)).mapError(RequestParsingError)
