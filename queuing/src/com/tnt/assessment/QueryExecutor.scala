@@ -1,8 +1,7 @@
 package com.tnt.assessment
 
-import Services.{Query, ServiceIdentifier}
+import QueuingService.{Query, BatchResult, ServiceIdentifier}
 import QueryExecutor._
-import io.circe.Json
 import io.circe.parser
 import org.asynchttpclient._
 import org.asynchttpclient.Dsl._
@@ -10,7 +9,7 @@ import zio.{IO, Task}
 import zio.interop.javaconcurrent._
 
 class QueryExecutor(host: String, runHttpRequest: RequestExecution) {
-  def execute(service: ServiceIdentifier, queries: List[Query]): IO[ExecutionFailure, Json] = {
+  def execute(service: ServiceIdentifier, queries: List[Query]): IO[ExecutionFailure, BatchResult] = {
     val request =
       get(s"$host/${service.entryName}")
         .addQueryParam("q", queries.mkString(","))
@@ -21,7 +20,11 @@ class QueryExecutor(host: String, runHttpRequest: RequestExecution) {
       json     <-
         if (response.getStatusCode < 400)
           IO
-            .fromEither(parser.parse(response.getResponseBody))
+            .fromEither {
+              parser
+                .parse(response.getResponseBody)
+                .flatMap(_.as[BatchResult])
+            }
             .mapError(RuntimeExecutionFailure(_))
         else
           IO.fail(HttpExecutionFailure(response.getStatusCode))
