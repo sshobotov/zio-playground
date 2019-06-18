@@ -1,13 +1,13 @@
 package com.tnt.assessment
 
-import QueuingService.{BatchResult, Query, ServiceIdentifier}
+import QueuingService.{Query, BatchResult, ServiceIdentifier}
 import QueryExecutor._
 import io.circe.parser
 import org.asynchttpclient._
 import org.asynchttpclient.Dsl._
 import zio.{IO, Promise, Queue, Task, UIO, ZIO}
 import zio.clock.Clock
-import zio.duration.Duration
+import zio.duration._
 import zio.interop.javaconcurrent._
 
 trait QueryExecutor[R] {
@@ -47,7 +47,7 @@ object HttpQueryExecutor {
 
 class ThrottlingQueryExecutor private(
     queues:  Map[ServiceIdentifier, Queue[ThrottlingQueryExecutor.EnqueuedJob]]
-  , timeout: Duration.Finite
+  , timeout: Duration
 ) extends QueryExecutor[Clock] {
   def execute(service: ServiceIdentifier, queries: List[Query]): ZIO[Clock, ExecutionFailure, BatchResult] =
     for {
@@ -59,15 +59,15 @@ class ThrottlingQueryExecutor private(
 }
 
 object ThrottlingQueryExecutor {
-  type QueuesConsumer[R]  = ZIO[R, Nothing, Nothing]
-  type ResolvableResult   = Promise[ExecutionFailure, BatchResult]
-  type EnqueuedJob        = (List[Query], ResolvableResult)
+  type QueuesDrainer[R] = ZIO[R, Nothing, Nothing]
+  type ResolvableResult = Promise[ExecutionFailure, BatchResult]
+  type EnqueuedJob      = (List[Query], ResolvableResult)
 
   def apply[R](
       underlying: QueryExecutor[R]
     , batchSize:  Int
-    , timeout:    Duration.Finite
-  ): UIO[(ThrottlingQueryExecutor, QueuesConsumer[R])] =
+    , timeout:    Duration
+  ): UIO[(ThrottlingQueryExecutor, QueuesDrainer[R])] =
     UIO.collectAll {
       ServiceIdentifier.values map { identifier =>
         Queue.unbounded[EnqueuedJob] map { (identifier, _) }
@@ -77,7 +77,7 @@ object ThrottlingQueryExecutor {
         queues
           .map { case (identifier, queue) =>
             queue.take
-              .batched(batchSize)
+              .filterOutAndBatch(_._2.isDone, batchSize)
               .flatMap { dequeued =>
                 val (queries, promises) = dequeued.unzip
 
@@ -99,12 +99,17 @@ object ThrottlingQueryExecutor {
     }
 
   private implicit class BatchingOps[T](val io: UIO[T]) extends AnyVal {
-    def batched(size: Int): UIO[List[T]] =
+    def filterOutAndBatch(reject: T => UIO[Boolean], size: Int): UIO[List[T]] =
       if (size > 0)
         for {
-          value <- io
-          rest  <- batched(size - 1)
-        } yield value :: rest
+          value     <- io
+          rejected  <- reject(value)
+          acc       <-
+            if (!rejected)
+              filterOutAndBatch(reject, size - 1) map { value :: _ }
+            else
+              filterOutAndBatch(reject, size)
+        } yield acc
       else
         UIO.succeed(Nil)
   }
@@ -113,8 +118,8 @@ object ThrottlingQueryExecutor {
 object QueryExecutor {
   def throttlingHttpQueryExecutor(
       host:      String
-    , batchSize: Int
-    , timeout:   Duration.Finite
+    , batchSize: Int      = 5
+    , timeout:   Duration = 5.seconds
   ) =
     ThrottlingQueryExecutor(
         new HttpQueryExecutor(host, HttpQueryExecutor.httpClient(asyncHttpClient()))
