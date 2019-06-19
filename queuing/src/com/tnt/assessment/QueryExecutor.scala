@@ -1,8 +1,8 @@
 package com.tnt.assessment
 
-import QueuingService.{Query, BatchResult, ServiceIdentifier}
+import QueuingService.{BatchResult, Query, QueryResult, ServiceIdentifier}
 import QueryExecutor._
-import io.circe.parser
+import io.circe.{Json, parser}
 import org.asynchttpclient._
 import org.asynchttpclient.Dsl._
 import zio.{IO, Promise, Queue, Task, UIO, ZIO}
@@ -50,18 +50,21 @@ class ThrottlingQueryExecutor private(
   , timeout: Duration
 ) extends QueryExecutor[Clock] {
   def execute(service: ServiceIdentifier, queries: List[Query]): ZIO[Clock, ExecutionFailure, BatchResult] =
-    for {
-      promise <- Promise.make[ExecutionFailure, BatchResult]
-      _       <- queues(service).offer((queries, promise))
-      result  <- promise.await.timeout(timeout)
-    } yield
-      result.getOrElse(Map.empty)
+    ZIO.collectAllPar {
+      queries map { query =>
+        for {
+          promise <- Promise.make[ExecutionFailure, QueryResult]
+          _       <- queues(service).offer(query, promise)
+          result  <- promise.await.timeout(timeout)
+        } yield query -> result.getOrElse(Json.Null)
+      }
+    } map { _.toMap }
 }
 
 object ThrottlingQueryExecutor {
   type QueuesDrainer[R] = ZIO[R, Nothing, Nothing]
-  type ResolvableResult = Promise[ExecutionFailure, BatchResult]
-  type EnqueuedJob      = (List[Query], ResolvableResult)
+  type ResolvableResult = Promise[ExecutionFailure, QueryResult]
+  type EnqueuedJob      = (Query, ResolvableResult)
 
   def apply[R](
       underlying: QueryExecutor[R]
@@ -81,12 +84,12 @@ object ThrottlingQueryExecutor {
               .flatMap { dequeued =>
                 val (queries, promises) = dequeued.unzip
 
-                underlying.execute(identifier, queries.flatten.distinct)
+                underlying.execute(identifier, queries.distinct)
                   .foldM(
                       error   => UIO.foreach_(promises)(_.fail(error))
                     , results =>
                         UIO.foreach_(dequeued) { case (query, promise) =>
-                          promise.succeed(results.filterKeys(query.contains))
+                          promise.succeed(results.getOrElse(query, Json.Null))
                         }
                   )
               }

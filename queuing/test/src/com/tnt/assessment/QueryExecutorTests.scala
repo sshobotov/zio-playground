@@ -42,7 +42,7 @@ object QueryExecutorTests extends TestSuite {
           } yield lists
 
         val expect =
-          List(List("100000001", "100000002"), List("100000003", "100000004"))
+          List(List("100000003", "100000004"), List("100000001", "100000002"))
         val actual = testRuntime.unsafeRun(program)
 
         assert(actual == expect)
