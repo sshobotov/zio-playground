@@ -22,7 +22,7 @@ object QueryExecutorTests extends TestSuite {
 
   val tests = Tests {
     test("ThrottlingQueryExecutor") {
-      test("should throttle expected number of requests") {
+      test("should throttle by preconfigured number of requests") {
         val program =
           for {
             requests            <- Ref.make(List.empty[List[String]])
@@ -41,11 +41,14 @@ object QueryExecutorTests extends TestSuite {
             lists <- requests.get
           } yield lists
 
-        val expect =
-          List(List("100000003", "100000004"), List("100000001", "100000002"))
+        val expect = List(List("100000003", "100000004"), List("100000001", "100000002"))
         val actual = testRuntime.unsafeRun(program)
 
         assert(actual == expect)
+      }
+
+      test("should throttle by preconfigured time") {
+
       }
     }
   }

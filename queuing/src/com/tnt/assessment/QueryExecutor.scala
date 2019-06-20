@@ -53,17 +53,17 @@ class ThrottlingQueryExecutor private(
     ZIO.collectAllPar {
       queries map { query =>
         for {
-          promise <- Promise.make[ExecutionFailure, QueryResult]
+          promise <- Promise.make[ExecutionFailure, Option[QueryResult]]
           _       <- queues(service).offer(query, promise)
           result  <- promise.await.timeout(timeout)
-        } yield query -> result.getOrElse(Json.Null)
+        } yield result.flatten map { (query, _) }
       }
-    } map { _.toMap }
+    } map { _.flatten.toMap }
 }
 
 object ThrottlingQueryExecutor {
   type QueuesDrainer[R] = ZIO[R, Nothing, Nothing]
-  type ResolvableResult = Promise[ExecutionFailure, QueryResult]
+  type ResolvableResult = Promise[ExecutionFailure, Option[QueryResult]]
   type EnqueuedJob      = (Query, ResolvableResult)
 
   def apply[R](
@@ -89,7 +89,7 @@ object ThrottlingQueryExecutor {
                       error   => UIO.foreach_(promises)(_.fail(error))
                     , results =>
                         UIO.foreach_(dequeued) { case (query, promise) =>
-                          promise.succeed(results.getOrElse(query, Json.Null))
+                          promise.succeed(results.get(query))
                         }
                   )
               }
