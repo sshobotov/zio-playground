@@ -46,6 +46,7 @@ object QueuingService {
   )
 
   object ServiceDataMapping {
+
     def plainValidation[T: Decoder](validateQuery: Validation.Validator[Query]): ServiceDataMapping =
       new ServiceDataMapping(
           validateQuery

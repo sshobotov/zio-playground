@@ -12,14 +12,6 @@ import zio.internal.tracing.TracingConfig
 import scala.concurrent.ExecutionContext
 
 object QueryExecutorTests extends TestSuite {
-  private def testRuntime = {
-    val platform =
-      PlatformLive
-        .fromExecutionContext(ExecutionContext.global)
-        .withTracingConfig(TracingConfig.disabled)
-
-    Runtime(Clock.Live, platform)
-  }
 
   val tests = Tests {
     test("HttpQueryExecutor") {
@@ -100,5 +92,14 @@ object QueryExecutorTests extends TestSuite {
         assert(actual == expect)
       }
     }
+  }
+
+  private def testRuntime = {
+    val platform =
+      PlatformLive
+        .fromExecutionContext(ExecutionContext.global)
+        .withTracingConfig(TracingConfig.disabled)
+
+    Runtime(Clock.Live, platform)
   }
 }

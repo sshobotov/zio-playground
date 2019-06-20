@@ -16,6 +16,7 @@ trait QueryExecutor[R] {
 }
 
 class HttpQueryExecutor(host: String, runHttpRequest: HttpQueryExecutor.RequestExecution) extends QueryExecutor[Any] {
+
   def execute(service: ServiceIdentifier, queries: List[Query]): IO[ExecutionFailure, BatchResult] = {
     val request =
       get(s"$host/${service.entryName}")
@@ -60,6 +61,7 @@ class ThrottlingQueryExecutor private(
     queues:  Map[ServiceIdentifier, Queue[ThrottlingQueryExecutor.EnqueuedJob]]
   , timeout: Duration
 ) extends QueryExecutor[Clock] {
+
   def execute(service: ServiceIdentifier, queries: List[Query]): ZIO[Clock, ExecutionFailure, BatchResult] =
     ZIO.collectAllPar {
       queries map { query =>
@@ -117,6 +119,7 @@ object ThrottlingQueryExecutor {
     }
 
   private implicit class BatchingOps[E, T](val stream: Stream[E, T]) extends AnyVal {
+
     def batch(size: Int): Stream[E, List[T]] =
       (1 until size)
         .map(_ => stream)
@@ -127,6 +130,7 @@ object ThrottlingQueryExecutor {
 }
 
 object QueryExecutor {
+
   def throttlingHttpQueryExecutor(
       host:      String
     , batchSize: Int      = 5
