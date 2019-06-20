@@ -64,7 +64,7 @@ object QueryExecutorTests extends TestSuite {
             lists <- requests.get
           } yield lists
 
-        val expect = List(List("100000003", "100000004"), List("100000001", "100000002"))
+        val expect = List(List("100000004", "100000003"), List("100000002", "100000001"))
         val actual = testRuntime.unsafeRun(program)
 
         assert(actual == expect)
@@ -74,12 +74,14 @@ object QueryExecutorTests extends TestSuite {
         val program =
           for {
             requests            <- Ref.make(List.empty[List[String]])
+            delayAcc            <- Ref.make(0)
             (executor, drainer) <-
               ThrottlingQueryExecutor(
                 (_, queries) =>
                   for {
-                    _ <- IO.unit.delay(40.millis)
-                    _ <- requests.update(queries :: _)
+                    delay <- delayAcc.modify(value => (value, value + 60))
+                    _     <- IO.unit.delay(delay.millis)
+                    _     <- requests.update(queries :: _)
                   } yield
                     queries.map(_ -> Json.obj()).toMap
                 , 1

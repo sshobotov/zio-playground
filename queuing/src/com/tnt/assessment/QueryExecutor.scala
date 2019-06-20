@@ -9,6 +9,7 @@ import zio.{IO, Promise, Queue, Task, UIO, ZIO}
 import zio.clock.Clock
 import zio.duration._
 import zio.interop.javaconcurrent._
+import zio.stream.Stream
 
 trait QueryExecutor[R] {
   def execute(service: ServiceIdentifier, queries: List[Query]): ZIO[R, ExecutionFailure, BatchResult]
@@ -73,14 +74,15 @@ class ThrottlingQueryExecutor private(
 }
 
 object ThrottlingQueryExecutor {
-  type QueuesDrainer[R] = ZIO[R, Nothing, Nothing]
+  type QueuesDrainer[R] = ZIO[R, Nothing, Unit]
   type ResolvableResult = Promise[ExecutionFailure, Option[QueryResult]]
   type EnqueuedJob      = (Query, ResolvableResult)
 
   def apply[R](
-      underlying: QueryExecutor[R]
-    , batchSize:  Int
-    , timeout:    Duration
+      underlying:   QueryExecutor[R]
+    , batchSize:    Int
+    , timeout:      Duration
+    , parallelism:  Int               = 1
   ): UIO[(ThrottlingQueryExecutor, QueuesDrainer[R])] =
     UIO.collectAll {
       ServiceIdentifier.values map { identifier =>
@@ -90,10 +92,11 @@ object ThrottlingQueryExecutor {
       val consumeAll =
         queues
           .map { case (identifier, queue) =>
-            queue
-              .take
-              .filterOutAndBatch(_._2.isDone, batchSize)
-              .flatMap { dequeued =>
+            Stream
+              .fromQueue(queue)
+              .filterM(_._2.isDone map { !_ })
+              .batch(batchSize)
+              .mapMPar(parallelism) { dequeued =>
                 val (queries, promises) = dequeued.unzip
 
                 underlying.execute(identifier, queries.distinct)
@@ -105,7 +108,7 @@ object ThrottlingQueryExecutor {
                         }
                   )
               }
-              .forever
+              .runDrain
           }
           .reduce(_ race _)
           .refailWithTrace
@@ -113,20 +116,13 @@ object ThrottlingQueryExecutor {
       (new ThrottlingQueryExecutor(queues.toMap, timeout), consumeAll)
     }
 
-  private implicit class BatchingOps[T](val io: UIO[T]) extends AnyVal {
-    def filterOutAndBatch(reject: T => UIO[Boolean], size: Int): UIO[List[T]] =
-      if (size > 0)
-        for {
-          value     <- io
-          rejected  <- reject(value)
-          acc       <-
-            if (!rejected)
-              filterOutAndBatch(reject, size - 1) map { value :: _ }
-            else
-              filterOutAndBatch(reject, size)
-        } yield acc
-      else
-        UIO.succeed(Nil)
+  private implicit class BatchingOps[E, T](val stream: Stream[E, T]) extends AnyVal {
+    def batch(size: Int): Stream[E, List[T]] =
+      (1 until size)
+        .map(_ => stream)
+        .foldLeft( stream.map(List(_)) ) { (s1, s2) =>
+          s1 zip s2 map { case (acc, elem) => elem :: acc }
+        }
   }
 }
 
