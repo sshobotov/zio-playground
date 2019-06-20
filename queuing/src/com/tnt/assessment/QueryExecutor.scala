@@ -2,7 +2,7 @@ package com.tnt.assessment
 
 import QueuingService.{BatchResult, Query, QueryResult, ServiceIdentifier}
 import QueryExecutor._
-import io.circe.{Json, parser}
+import io.circe.parser
 import org.asynchttpclient._
 import org.asynchttpclient.Dsl._
 import zio.{IO, Promise, Queue, Task, UIO, ZIO}
@@ -24,25 +24,35 @@ class HttpQueryExecutor(host: String, runHttpRequest: HttpQueryExecutor.RequestE
     for {
       response <- runHttpRequest(request).mapError(RuntimeExecutionFailure)
       json     <-
-        if (response.getStatusCode < 400)
+        if (response.statusCode < 400)
           IO
             .fromEither {
               parser
-                .parse(response.getResponseBody)
+                .parse(response.body)
                 .flatMap(_.as[BatchResult])
             }
             .mapError(RuntimeExecutionFailure(_))
         else
-          IO.fail(HttpExecutionFailure(response.getStatusCode))
+          IO.fail(HttpExecutionFailure(response.statusCode))
     } yield json
   }
 }
 
 object HttpQueryExecutor {
-  type RequestExecution = Request => Task[Response]
+  type RequestExecution = Request => Task[StrictResponse]
+
+  final case class StrictResponse(statusCode: Int, body: String)
+
+  object StrictResponse {
+    def fromResponse(response: Response): StrictResponse =
+      new StrictResponse(response.getStatusCode, response.getResponseBody)
+  }
 
   def httpClient(httpClient: AsyncHttpClient): RequestExecution =
-    request => Task.fromFutureJava(IO(httpClient.executeRequest(request)))
+    request =>
+      Task
+        .fromFutureJava(IO(httpClient.executeRequest(request)))
+        .map(StrictResponse.fromResponse)
 }
 
 class ThrottlingQueryExecutor private(
@@ -56,7 +66,8 @@ class ThrottlingQueryExecutor private(
           promise <- Promise.make[ExecutionFailure, Option[QueryResult]]
           _       <- queues(service).offer(query, promise)
           result  <- promise.await.timeout(timeout)
-        } yield result.flatten map { (query, _) }
+        } yield
+          result.flatten map { (query, _) }
       }
     } map { _.flatten.toMap }
 }
@@ -79,7 +90,8 @@ object ThrottlingQueryExecutor {
       val consumeAll =
         queues
           .map { case (identifier, queue) =>
-            queue.take
+            queue
+              .take
               .filterOutAndBatch(_._2.isDone, batchSize)
               .flatMap { dequeued =>
                 val (queries, promises) = dequeued.unzip

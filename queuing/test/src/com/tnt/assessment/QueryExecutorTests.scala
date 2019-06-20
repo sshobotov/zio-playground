@@ -2,7 +2,7 @@ package com.tnt.assessment
 
 import QueuingService.ServiceIdentifier
 import utest._
-import zio.{Ref, Runtime}
+import zio.{Ref, Runtime, IO}
 import zio.clock.Clock
 import zio.duration._
 import zio.internal.PlatformLive
@@ -21,8 +21,29 @@ object QueryExecutorTests extends TestSuite {
   }
 
   val tests = Tests {
+    test("HttpQueryExecutor") {
+      import org.asynchttpclient.Request
+
+      test("should format queries with expected format") {
+        val program =
+          for {
+            maybeReq <- Ref.make[Option[Request]](None)
+            response = HttpQueryExecutor.StrictResponse(200, "{}")
+            executor = new HttpQueryExecutor("http://localhost", req => maybeReq.set(Some(req)).const(response))
+
+            _       <- executor.execute(ServiceIdentifier.Pricing, List("US", "UK"))
+            request <- maybeReq.get
+          } yield request.map(_.getUrl)
+
+        val expect = Some("http://localhost/pricing?q=US%2CUK")
+        val actual = testRuntime.unsafeRun(program)
+
+        assert(actual == expect)
+      }
+    }
+
     test("ThrottlingQueryExecutor") {
-      test("should throttle by preconfigured number of requests") {
+      test("should throttle with preconfigured number of requests") {
         val program =
           for {
             requests            <- Ref.make(List.empty[List[String]])
@@ -37,6 +58,7 @@ object QueryExecutorTests extends TestSuite {
             _     <- executor.execute(ServiceIdentifier.Shipment, List("100000001"))
             _     <- executor.execute(ServiceIdentifier.Shipment, List("100000002", "100000003"))
             _     <- executor.execute(ServiceIdentifier.Shipment, List("100000004"))
+            _     <- executor.execute(ServiceIdentifier.Shipment, List("100000005"))
             _     <- fiber.interrupt
             lists <- requests.get
           } yield lists
@@ -47,8 +69,32 @@ object QueryExecutorTests extends TestSuite {
         assert(actual == expect)
       }
 
-      test("should throttle by preconfigured time") {
+      test("should sent out after preconfigured timeout") {
+        val program =
+          for {
+            requests            <- Ref.make(List.empty[List[String]])
+            (executor, drainer) <-
+              ThrottlingQueryExecutor(
+                (_, queries) =>
+                  for {
+                    _ <- IO.unit.delay(60.millis)
+                    _ <- requests.update(queries :: _)
+                  } yield Map.empty
+                , 1
+                , 50.millis
+              )
 
+            fiber <- drainer.fork
+            _     <- executor.execute(ServiceIdentifier.Shipment, List("100000001"))
+            _     <- executor.execute(ServiceIdentifier.Shipment, List("100000002"))
+            _     <- fiber.interrupt
+            lists <- requests.get
+          } yield lists
+
+        val expect = List(List("100000001"))
+        val actual = testRuntime.unsafeRun(program)
+
+        assert(actual == expect)
       }
     }
   }
