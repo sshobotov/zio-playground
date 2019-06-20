@@ -1,8 +1,9 @@
 package com.tnt.assessment
 
 import QueuingService.ServiceIdentifier
+import io.circe.Json
 import utest._
-import zio.{Ref, Runtime, IO}
+import zio.{IO, Ref, Runtime}
 import zio.clock.Clock
 import zio.duration._
 import zio.internal.PlatformLive
@@ -77,21 +78,21 @@ object QueryExecutorTests extends TestSuite {
               ThrottlingQueryExecutor(
                 (_, queries) =>
                   for {
-                    _ <- IO.unit.delay(60.millis)
+                    _ <- IO.unit.delay(40.millis)
                     _ <- requests.update(queries :: _)
-                  } yield Map.empty
+                  } yield
+                    queries.map(_ -> Json.obj()).toMap
                 , 1
                 , 50.millis
               )
 
-            fiber <- drainer.fork
-            _     <- executor.execute(ServiceIdentifier.Shipment, List("100000001"))
-            _     <- executor.execute(ServiceIdentifier.Shipment, List("100000002"))
-            _     <- fiber.interrupt
-            lists <- requests.get
-          } yield lists
+            fiber   <- drainer.fork
+            result  <- executor.execute(ServiceIdentifier.Shipment, List("100000001", "100000002"))
+            _       <- fiber.interrupt
+            lists   <- requests.get
+          } yield (lists, result)
 
-        val expect = List(List("100000001"))
+        val expect = (List(List("100000001")), Map("100000001" -> Json.obj()))
         val actual = testRuntime.unsafeRun(program)
 
         assert(actual == expect)
