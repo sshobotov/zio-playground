@@ -11,5 +11,6 @@ mill queuing.test
 To open the code with your IntelliJ you need to generate some files:
 
 ```
+mill queuing.compile
 mill mill.scalalib.GenIdea/idea
 ```

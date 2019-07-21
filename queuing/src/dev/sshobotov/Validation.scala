@@ -1,4 +1,4 @@
-package com.tnt.assessment
+package dev.sshobotov
 
 import java.util.Locale
 

@@ -1,7 +1,7 @@
-package com.tnt.assessment.api
+package dev.sshobotov
+package api
 
-import com.tnt.assessment.QueuingService.ServiceDataMapping
-import com.tnt.assessment.Validation
+import QueuingService.ServiceDataMapping
 
 object PricingApi {
   type Price = Double

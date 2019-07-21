@@ -1,6 +1,6 @@
-package com.tnt.assessment
+package dev.sshobotov
 
-import com.tnt.assessment.api.{PricingApi, ShipmentApi, TrackApi}
+import api.{PricingApi, ShipmentApi, TrackApi}
 import enumeratum.{Enum, EnumEntry}
 import enumeratum.EnumEntry.Lowercase
 import io.circe.{Decoder, Error, Json}
@@ -15,6 +15,23 @@ object QueuingService {
   type QueryResult  = Json
   type BatchResult  = Map[Query, QueryResult]
   type ServiceMap   = ServiceIdentifier => ServiceDataMapping
+
+  def serviceMap: ServiceMap = {
+    case ServiceIdentifier.Shipment => ShipmentApi.dataMapping
+    case ServiceIdentifier.Track    => TrackApi.dataMapping
+    case ServiceIdentifier.Pricing  => PricingApi.dataMapping
+  }
+
+  def executeRequests[R](
+      requests: Requests
+    , services: ServiceMap
+    , executor: QueryExecutor[R]
+  ): ZIO[R, Nothing, Response] =
+    ZIO.collectAllPar(
+      requests map { request =>
+        executeSingleRequest(request, services(request.identifier), executor)
+      }
+    )
 
   sealed trait ServiceIdentifier extends EnumEntry with Lowercase
 
@@ -53,23 +70,6 @@ object QueuingService {
         , json  => implicitly[Decoder[T]].decodeJson(json).map(_ => json)
       )
   }
-
-  def serviceMap: ServiceMap = {
-    case ServiceIdentifier.Shipment => ShipmentApi.dataMapping
-    case ServiceIdentifier.Track    => TrackApi.dataMapping
-    case ServiceIdentifier.Pricing  => PricingApi.dataMapping
-  }
-
-  def executeRequests[R](
-      requests: Requests
-    , services: ServiceMap
-    , executor: QueryExecutor[R]
-  ): ZIO[R, Nothing, Response] =
-    ZIO.collectAllPar(
-      requests map { request =>
-        executeSingleRequest(request, services(request.identifier), executor)
-      }
-    )
 
   private def executeSingleRequest[R](
       request:     RequestEntry

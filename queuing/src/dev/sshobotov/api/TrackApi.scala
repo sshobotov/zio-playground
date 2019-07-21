@@ -1,9 +1,9 @@
-package com.tnt.assessment.api
+package dev.sshobotov
+package api
 
-import com.tnt.assessment.QueuingService.ServiceDataMapping
-import com.tnt.assessment.Validation
 import enumeratum.EnumEntry.UpperWords
 import enumeratum.{CirceEnum, Enum, EnumEntry}
+import QueuingService.ServiceDataMapping
 
 object TrackApi {
   sealed trait Status extends EnumEntry with UpperWords
